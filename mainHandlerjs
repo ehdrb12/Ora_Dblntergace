@@ -1,0 +1,432 @@
+GF.libPool.mainHandler = {
+    // global variable
+    _DS_POPNOTICE: null,
+    _USER_AGENT: null,
+    _init: function (param) {
+
+        this._initData();
+        
+        return this;
+    }
+    , _initData: function () {
+        var oThis = this;
+        
+        var loginInfo = GF.getLogin();
+
+        $("#user_info").prepend(" / <a href='#;' class='user'><strong>" + loginInfo.USER_NM + "</strong></a>");
+        $("#user_info").prepend(" / " + loginInfo.USER_DESC);
+        $("#user_info").prepend(loginInfo.DEPT_NM);
+
+        $("#sel_lang").val(loginInfo.LANG_CD).prop("selected", true);
+        
+        oThis._USER_AGENT = navigator.userAgent.toLowerCase();
+
+        var data = {};
+        data.ACTION_ID = "SYSCOM001_01";//mainInitList
+        data.DS_SEARCH = [];
+        var sParam = {};
+        sParam.WEB_TYPE = "PC"; 
+        
+        if(oThis._USER_AGENT.match('iphone')|| oThis._USER_AGENT.match('ipad') || oThis._USER_AGENT.match('ipod') || oThis._USER_AGENT.match('android')) { 
+            sParam.WEB_TYPE = "MOBILE";
+        }       
+
+        data.DS_SEARCH.push(sParam);
+        
+        AdaptorTransaction(data, function(res) {
+        
+            GV.MESSAGE = res.GDS_MESSAGE;
+            GV.LABEL = res.GDS_LABEL;
+
+            if (localStorageSupport()) {
+
+                localStorage.setItem("GV.MESSAGE", JSON.stringify(res.GDS_MESSAGE));
+                localStorage.setItem("GV.LABEL", JSON.stringify(res.GDS_LABEL));
+            }
+            
+            //메뉴 start
+            var source =
+            {
+                datatype: "json",
+                datafields: [
+                    { name: 'MENU_ID' },
+                    { name: 'PRNT_MENU_ID' },
+                    { name: 'MENU_NM' },
+                    { name: 'PGM_URL' }
+                ],
+                id: 'MENU_ID',
+                localdata: JSON.stringify(res.GDS_ALL_MENU)
+            };
+            
+            var dataAdapter = new $.jqx.dataAdapter(source, {
+                loadComplete: function (records) {
+                    var menu_nm = "";
+                    var menu_ids = [];
+                    
+                    var getMenu = function(mData, cMenu){
+                        for(var i = 0; i<mData.length; i++){
+                            if(mData[i].MENU_ID == cMenu){
+
+                                menu_nm = mData[i].MENU_NM + " > " + menu_nm;
+                                menu_ids.push(mData[i].MENU_ID);
+                                
+                                if(mData[i].PRNT_MENU_ID != ""){
+                                    getMenu(mData, mData[i].PRNT_MENU_ID);
+                                }else{
+                                    
+                                    return {"menu_nm":menu_nm, "menu_ids":menu_ids};
+                                }
+                            }
+                        }
+                        return {"menu_nm":menu_nm, "menu_ids":menu_ids};
+                    }
+
+                    var data = JSON.parse(records);
+                    var menu_info = {}
+                    for(var i=0; i < data.length; i++){
+                        menu_nm = "";
+                        menu_info = {};
+                        menu_info.id = data[i].MENU_ID;
+                        menu_info.text = data[i].MENU_NM;
+                        menu_nm = "[ " + data[i].MENU_NM + " ]";
+                        
+                        if(data[i].PRNT_MENU_ID != ""){
+                            menu_ids = [];
+                            menu_ids.push(data[i].MENU_ID);
+                            var cMenu = getMenu(data, data[i].PRNT_MENU_ID);
+                            menu_info.navi = cMenu.menu_nm;
+                            menu_info.ids = cMenu.menu_ids;
+                        }else{
+                            menu_info.navi = menu_nm;
+                            menu_ids = [];
+                            menu_ids.push(data[i].MENU_ID);
+                            menu_info.ids = menu_ids;
+                        }
+                        
+                        menu_info.com_btn = data[i].COM_BTN;
+                            
+                        GV.MENU.push(menu_info);
+                        
+                        // 메뉴정보 LocalStrorage 저장
+                        // frame 영역에서 접근하기 용이하도록
+                        if (localStorageSupport()) {
+                            localStorage.setItem("GV.MENU", JSON.stringify(GV.MENU));
+                        }
+                    }
+
+                    var records = dataAdapter.getRecordsHierarchy('MENU_ID', 'PRNT_MENU_ID', 'items', [{ name: 'MENU_NM', map: 'label'},{ name: 'MENU_ID', map: 'id'}]);
+
+                    // Top : main menu binding
+                    $("#jqxMenu").jqxMenu({ 
+                        source: records,
+                        width: '100%', 
+                        height: '36',
+                        enableHover: true,
+                        autoOpen: false, //true, false
+                        clickToOpen: true, //true, false
+                        autoCloseOnClick: true,
+                        showTopLevelArrows: false, //true, false
+                        autoSizeMainItems: true,
+                        //autoCloseInterval: 4000,  //마우스 오버 시 Not Close 2019-05-14 윤완희
+                        theme: 'custom',
+                        minimizeWidth: 800
+                    });
+
+                    $("#jqxMenu").css('visibility', 'visible');
+
+                    $("#jqxMenu").on('itemclick', function (event) {
+
+                        if(event.args.childElementCount!=0) return; //최하위 노드를 클릭했을 경우가 아니면
+                        var id = event.args.id;
+                        var text = $(event.args).text();
+
+                        $.grep(data, function (obj,index) { 
+                            if((obj.MENU_LVL=='2' || obj.MENU_LVL=='3') && obj.PGM_URL != '' && obj.MENU_ID==id) {
+
+                                //COM_MENU_LOG 저장
+                                if(id != "") {
+                                    var menudata = {};
+                                    menudata.ACTION_ID = "COMSYS010_01";
+                                    menudata.MENU_ID = id;
+                                    menudata.async = false;
+                                    AdaptorTransaction(menudata, function(res){});
+                                }
+
+                                $("#menuid").val(id);
+                                $("#menunm").val(text);
+                                $("#pageurl").val(obj.PGM_URL);
+                                $("#event").val(event);
+                                $("#menuForm").attr({
+                                    "target" : "_self",
+                                    "action" : "index.jsp"
+                                }).submit();
+                            }
+                        });
+                    });
+                }
+            });
+            dataAdapter.dataBind();         
+
+            oThis._initForm()._clickEvent();
+            
+        });
+        
+    }
+    , _initForm: function () {
+        var oThis = this;
+
+//      var cookiedata = document.cookie;
+//      
+//      if ( oThis._DS_POPNOTICE.length > 0 && cookiedata.indexOf("noticeWindow=done") < 0 ) {
+//          setTimeout(function() {
+//              callPopup({ id: "noticeWindow", title: "공지사항", url: "/kci_admin/pages/POPUP/POPNOTICE.jsp", width: 620, height: 630 });
+//          }, 200);
+//      }
+        
+        return this;
+    }
+    , _clickEvent: function () {
+        var oThis = this;
+
+        
+        $("#modifyinfo").off("click").on('click', function (event) {
+            
+            var title = "사용자 정보";
+            callPopup({ id: "modifyinfoWindow", title: title, isModal: true, url: "modifyinfo.jsp", width: 390, height: 505 });
+        });
+
+        var loginInfo = GF.getLogin();
+        $("#sel_lang").change(function(event){
+            GV.loginInfo.LANG_CD = event.target.value;
+
+            if (localStorageSupport()) {
+                localStorage.setItem("GF.login", JSON.stringify(GV.loginInfo));
+            }
+
+            $("#menuForm").attr({
+                "target" : "_self",
+                "action" : "main.jsp",
+                success: function (response) {
+                }
+            }).submit();
+        });
+
+        //로그아웃
+        $("#logout").off("click").on("click", function () {
+
+            swal({title:GF.message("COM_SYS_Q0001",["로그아웃"]), type: "question", showCancelButton: true}).then(function (isConfirm){ //로그아웃하시겠습니까?
+                if(isConfirm.value){
+                    oThis._logOut();
+                }
+            });
+        });
+
+
+        $("#smsSend").off("click").on('click', function(event) {
+            var title = "SMS 발송";
+            callPopup({ id: "sendSmsWindow", title: title, isModal: false, url: "/kci_admin/pages/POPUP/POPSENDSMS.jsp", width: 675, height: 710 });
+        });
+
+
+        $("#help_desk").off("click").on('click', function(event) {
+            var title = "Help Desk";
+            callPopup({ id: "popupManager", title: title, isModal: false, url: "/kci_admin/pages/POPUP/POPMANAGER.jsp", width: 380, height: 275 });
+        });
+        
+        // Collector, Machine 상태 팝업
+        $(".state_popup").off("click").on("click", function () {
+
+            var xOffset = $(this).offset().left + $(this).width() + 10;
+            var yOffset = $(this).offset().top;
+
+            callPopup({ id: "popupWindow"
+                      , title: ""
+                      , isModal: true, url: "/kci_admin/pages/SAMPLE/SAMPLE013_P01.jsp"
+                      , width: 300
+                      , height: 370
+                      , position: { x: xOffset, y: yOffset }
+                       });
+        });
+
+        return this;
+    }
+//  , _getMenuInfo: function () {
+//      var oThis = this;
+//
+//      var actionID = "COMSYS001_03";
+//      var data = {};
+//      data.ACTION_ID = actionID;
+//      data.DS_SEARCH = [];
+//      var sParam = {};
+//      sParam.WEB_TYPE = "PC"; 
+//      
+////        var filter = "win16|win32|win64|mac|macintel";
+////        if (navigator.platform ) {
+////            if (filter.indexOf(navigator.platform.toLowerCase()) < 0) {
+////                sParam.WEB_TYPE = "MOBILE";
+////            } 
+////        }
+//      var userAgent = navigator.userAgent.toLowerCase();
+//      //모바일 접속 시 모바일 화면으로 이동
+//      if(userAgent.match('iphone') || userAgent.match('ipad') || userAgent.match('ipod') || userAgent.match('android') ) { 
+//          sParam.WEB_TYPE = "MOBILE";
+//      }
+//
+//      data.DS_SEARCH.push(sParam);
+//
+//      AdaptorTransaction(data, function(res){
+//
+//          var source =
+//          {
+//              datatype: "json",
+//              datafields: [
+//                  { name: 'MENU_ID' },
+//                  { name: 'PRNT_MENU_ID' },
+//                  { name: 'MENU_NM' },
+//                  { name: 'PGM_URL' }
+//              ],
+//              id: 'MENU_ID',
+//              //localdata: res.GDS_ALL_MENU
+//              localdata: JSON.stringify(res.GDS_ALL_MENU)
+//          };
+//          
+//          var dataAdapter = new $.jqx.dataAdapter(source, {
+//              loadComplete: function (records) {
+//                  var menu_nm = "";
+//                  var menu_ids = [];
+//                  
+//                  var getMenu = function(mData, cMenu){
+//                      for(var i = 0; i<mData.length; i++){
+//                          if(mData[i].MENU_ID == cMenu){
+//
+//                              menu_nm = mData[i].MENU_NM + " > " + menu_nm;
+//                              menu_ids.push(mData[i].MENU_ID);
+//                              
+//                              if(mData[i].PRNT_MENU_ID != ""){
+//                                  getMenu(mData, mData[i].PRNT_MENU_ID);
+//                              }else{
+//                                  
+//                                  return {"menu_nm":menu_nm, "menu_ids":menu_ids};
+//                              }
+//                          }
+//                      }
+//                      return {"menu_nm":menu_nm, "menu_ids":menu_ids};
+//                  }
+//
+//                  var data = JSON.parse(records);
+//                  var menu_info = {}
+//                  for(var i=0; i < data.length; i++){
+//                      menu_nm = "";
+//                      menu_info = {};
+//                      menu_info.id = data[i].MENU_ID;
+//                      menu_info.text = data[i].MENU_NM;
+//                      menu_nm = "[ " + data[i].MENU_NM + " ]";
+//                      
+//                      if(data[i].PRNT_MENU_ID != ""){
+//                          menu_ids = [];
+//                          menu_ids.push(data[i].MENU_ID);
+//                          var cMenu = getMenu(data, data[i].PRNT_MENU_ID);
+//                          menu_info.navi = cMenu.menu_nm;
+//                          menu_info.ids = cMenu.menu_ids;
+//                      }else{
+//                          menu_info.navi = menu_nm;
+//                          menu_ids = [];
+//                          menu_ids.push(data[i].MENU_ID);
+//                          menu_info.ids = menu_ids;
+//                      }
+//                      
+//                      menu_info.com_btn = data[i].COM_BTN;
+//                          
+//                      GV.MENU.push(menu_info);
+//                      
+//                      // 메뉴정보 LocalStrorage 저장
+//                      // frame 영역에서 접근하기 용이하도록
+//                      if (localStorageSupport()) {
+//                          localStorage.setItem("GV.MENU", JSON.stringify(GV.MENU));
+//                      }
+//                  }
+//
+//                  var records = dataAdapter.getRecordsHierarchy('MENU_ID', 'PRNT_MENU_ID', 'items', [{ name: 'MENU_NM', map: 'label'},{ name: 'MENU_ID', map: 'id'}]);
+//
+//                  // Top : main menu binding
+//                  $("#jqxMenu").jqxMenu({ 
+//                      source: records,
+//                      width: '100%', 
+//                      height: '36',
+//                      enableHover: true,
+//                      autoOpen: false, //true, false
+//                      clickToOpen: true, //true, false
+//                      autoCloseOnClick: true,
+//                      showTopLevelArrows: false, //true, false
+//                      autoSizeMainItems: true,
+//                      //autoCloseInterval: 4000,  //마우스 오버 시 Not Close 2019-05-14 윤완희
+//                      theme: 'custom',
+//                      minimizeWidth: 800
+//                  });
+//
+//                  $("#jqxMenu").css('visibility', 'visible');
+//
+//                  $("#jqxMenu").on('itemclick', function (event) {
+//
+//                      if(event.args.childElementCount!=0) return; //최하위 노드를 클릭했을 경우가 아니면
+//                      var id = event.args.id;
+//                      var text = $(event.args).text();
+//
+//                      $.grep(data, function (obj,index) { 
+//                          if((obj.MENU_LVL=='2' || obj.MENU_LVL=='3') && obj.PGM_URL != '' && obj.MENU_ID==id) {
+//
+//                              //COM_MENU_LOG 저장
+//                              if(id != "") {
+//                                  var menudata = {};
+//                                  menudata.ACTION_ID = "COMSYS010_01";
+//                                  menudata.MENU_ID = id;
+//                                  menudata.async = false;
+//                                  AdaptorTransaction(menudata, function(res){});
+//                              }
+//
+//                              $("#menuid").val(id);
+//                              $("#menunm").val(text);
+//                              $("#pageurl").val(obj.PGM_URL);
+//                              $("#event").val(event);
+//                              $("#menuForm").attr({
+//                                  "target" : "_self",
+//                                  "action" : "index.jsp"
+//                              }).submit();
+//                          }
+//                      });
+//                  });
+//              },
+//              loadError: function(jqXHR, status, error)
+//              {
+//  //                  console.log('error');
+//              },
+//              beforeLoadComplete: function (records) {
+//  //                  console.log('beforeLoadComplete');
+//              }               
+//          });
+//
+//          dataAdapter.dataBind();
+//      });
+//
+//      return this;
+//    }
+
+    , _getArgs: function () {
+        var oThis = this;
+        
+        return this;
+    }
+    , _logOut: function () {
+        
+        var oThis = this;
+        
+        var data = {};
+        data.ACTION_ID = "COMSYS007_04";
+        
+        AdaptorTransaction(data, function(res) {
+            $(document).empty();
+            window.location.replace('login.jsp');
+        });
+        return this;
+    }
+};
